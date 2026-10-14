@@ -1,0 +1,131 @@
+{
+  "admin": {
+    "entry": "/settings",
+    "pages": [
+      {
+        "description": "Configure this extension.",
+        "icon": "i-lucide-settings",
+        "label": "Settings",
+        "order": 100,
+        "path": "/settings",
+        "view": "settings"
+      }
+    ]
+  },
+  "aiTools": [
+    {
+      "contractVersion": "wiki.harvester.status.read@1",
+      "description": "Report the Wiki Harvester knowledge-base status: harvested entry counts per source topic.",
+      "handler": "wiki.harvester.status.read",
+      "id": "wiki.harvester.status.read",
+      "name": "wiki-harvest-status",
+      "parameters": {
+        "properties": {
+          "topicId": {
+            "description": "Optional source topic id. Omit for a global summary.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "timeoutMs": 1000
+    }
+  ],
+  "author": {
+    "name": "SForum"
+  },
+  "backend": {
+    "digest": "e9d107d77037a35a6653be66e42812b2524ad8dd4f45b17c4ae642994e9cd036",
+    "entry": "backend/plugin",
+    "hostApiVersion": "sforum.host@2",
+    "protocolVersion": 2,
+    "rpc": "hashicorp-go-plugin"
+  },
+  "description": "Harvest high-quality forum discussions into a site knowledge base via AI tools.",
+  "id": "wiki.harvester",
+  "manifestVersion": 3,
+  "name": "Wiki Harvester",
+  "packageFiles": [
+    {
+      "digest": "e9d107d77037a35a6653be66e42812b2524ad8dd4f45b17c4ae642994e9cd036",
+      "id": "wiki.harvester.file.backend",
+      "kind": "executable",
+      "path": "backend/plugin"
+    }
+  ],
+  "permissionDefinitions": [
+    {
+      "assignmentPolicy": "host",
+      "contractVersion": "wiki.harvester.manage@1",
+      "description": "Manage this extension.",
+      "key": "wiki.harvester.manage",
+      "label": "Manage Wiki Harvester",
+      "recommendedRoles": [
+        "administrator"
+      ]
+    }
+  ],
+  "permissions": [
+    "wiki.harvester.manage"
+  ],
+  "settings": {
+    "fields": [
+      {
+        "default": "true",
+        "description": "Enable this extension's recommended behavior.",
+        "group": "",
+        "groupId": "general",
+        "key": "wiki.harvester.enabled",
+        "label": "Enabled",
+        "placeholder": "",
+        "type": "boolean"
+      }
+    ],
+    "schemaVersion": 1,
+    "ui": {
+      "callouts": [
+        {
+          "body": "",
+          "id": "recommended",
+          "linkLabel": "",
+          "tab": "general",
+          "title": {
+            "en-US": "Start with the recommended defaults",
+            "zh-CN": "建议先使用推荐默认值"
+          },
+          "tone": "info"
+        }
+      ],
+      "groups": [
+        {
+          "columns": 1,
+          "description": "",
+          "id": "general",
+          "label": {
+            "en-US": "General",
+            "zh-CN": "常规"
+          }
+        }
+      ],
+      "layout": "tabs",
+      "mode": "schema",
+      "tabs": [
+        {
+          "description": "",
+          "groups": [
+            "general"
+          ],
+          "id": "general",
+          "label": {
+            "en-US": "General",
+            "zh-CN": "常规"
+          }
+        }
+      ]
+    }
+  },
+  "sforumVersion": "^1.0.0",
+  "type": "plugin",
+  "url": "https://github.com/zhuchunshu/sforum",
+  "version": "0.1.0"
+}

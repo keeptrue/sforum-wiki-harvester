@@ -1,0 +1,4 @@
+[submodule "upstream/sforum"]
+	path = upstream/sforum
+	url = https://github.com/zhuchunshu/sforum.git
+	branch = main
