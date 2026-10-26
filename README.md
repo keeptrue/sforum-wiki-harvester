@@ -10,7 +10,7 @@ Manifest V3 `aiTools[]` 向宿主 AI 补全循环贡献只读工具；词条提�
 - Name: **SForum Wiki Harvester**
 - Type: `plugin`（非内置，operator 安装）
 - Manifest contract: `sforum.manifest@3` / Protocol V2（`hashicorp-go-plugin`）
-- Website: https://github.com/zhuchunshu/sforum
+- Website: https://github.com/keeptrue/sforum
 
 ## AI 工具
 

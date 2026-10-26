@@ -1,9 +1,9 @@
 package main
 
 import (
-	pluginv2 "github.com/zhuchunshu/sforum/apps/api/sdk/plugin/v2"
+	pluginv2 "github.com/keeptrue/sforum/apps/api/sdk/plugin/v2"
 
-	"github.com/zhuchunshu/sforum-wiki-harvester/backend/wiki"
+	"github.com/keeptrue/sforum-wiki-harvester/backend/wiki"
 )
 
 // wikiHarvesterPluginV2 装配 Wiki Harvester 的 AI 工具注册表。
