@@ -35,7 +35,7 @@
     "name": "SForum"
   },
   "backend": {
-    "digest": "e9d107d77037a35a6653be66e42812b2524ad8dd4f45b17c4ae642994e9cd036",
+    "digest": "ae3e14d15f38b870eacde6b5c95781d60c0d0e9429ef680e38d4d0ccd683516c",
     "entry": "backend/plugin",
     "hostApiVersion": "sforum.host@2",
     "protocolVersion": 2,
@@ -47,7 +47,7 @@
   "name": "Wiki Harvester",
   "packageFiles": [
     {
-      "digest": "e9d107d77037a35a6653be66e42812b2524ad8dd4f45b17c4ae642994e9cd036",
+      "digest": "ae3e14d15f38b870eacde6b5c95781d60c0d0e9429ef680e38d4d0ccd683516c",
       "id": "wiki.harvester.file.backend",
       "kind": "executable",
       "path": "backend/plugin"
@@ -124,8 +124,8 @@
       ]
     }
   },
-  "sforumVersion": "^1.0.0",
+  "sforumVersion": ">=3.0.0",
   "type": "plugin",
   "url": "https://github.com/keeptrue/sforum",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
