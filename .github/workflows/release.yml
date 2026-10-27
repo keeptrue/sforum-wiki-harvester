@@ -1,0 +1,195 @@
+name: release
+
+# 推 v* 标签即发布：每个目标平台各自构建二进制、刷新摘要、打成 SForum 包并挂到 Release。
+#
+# 本仓库的扩展包根就是仓库根（sforum.extension.json 在根目录），发布包只收
+# manifest + README/LICENSE + backend/plugin，不带 Go 源码与 upstream 子模块。
+#
+# 也可用 workflow_dispatch 手动跑（只做校验与构建，不创建 Release）。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      sforum_ref:
+        description: 构建所使用的 SForum 引用（tag / 分支 / commit）
+        required: false
+        default: main
+
+permissions:
+  contents: write
+
+env:
+  SFORUM_REPOSITORY: keeptrue/SForum
+  SFORUM_REF: ${{ github.event.inputs.sforum_ref || 'main' }}
+  PACKAGE_SLUG: sforum-wiki-harvester
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SFORUM_REPOSITORY }}
+          ref: ${{ env.SFORUM_REF }}
+          path: sforum
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: plugin/backend/go.mod
+          cache-dependency-path: plugin/backend/go.sum
+
+      - name: Point SDK replace at the checked-out framework
+        working-directory: plugin/backend
+        run: go mod edit -replace github.com/keeptrue/sforum/apps/api="$GITHUB_WORKSPACE/sforum/apps/api"
+
+      - name: Backend vet and unit tests
+        working-directory: plugin/backend
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Verify tag matches manifest version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          MANIFEST_VERSION="$(python3 -c "import json;print(json.load(open('plugin/sforum.extension.json'))['version'])")"
+          echo "tag=$TAG_VERSION manifest=$MANIFEST_VERSION"
+          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error title=版本不一致::标签 v$TAG_VERSION 与 sforum.extension.json 的 version ($MANIFEST_VERSION) 不一致。"
+            exit 1
+          fi
+
+      - name: Build host binary and run host contract checks
+        run: |
+          set -euo pipefail
+          (cd plugin/backend && CGO_ENABLED=0 go build -trimpath -o "$GITHUB_WORKSPACE/plugin/backend/plugin" ./)
+          cd sforum/apps/api
+          go run ./cmd/sforum extension digest --write "$GITHUB_WORKSPACE/plugin"
+          go run ./cmd/sforum extension validate "$GITHUB_WORKSPACE/plugin"
+          go run ./cmd/sforum extension test "$GITHUB_WORKSPACE/plugin"
+
+      # validate / test 不检查 sforumVersion；这一步才是宿主真实的安装/启用闸门。
+      - name: Host core compatibility gate
+        working-directory: sforum/apps/api
+        run: go run "$GITHUB_WORKSPACE/plugin/.github/compatcheck/main.go" "$GITHUB_WORKSPACE/plugin/sforum.extension.json"
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SFORUM_REPOSITORY }}
+          ref: ${{ env.SFORUM_REF }}
+          path: sforum
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: plugin/backend/go.mod
+          cache-dependency-path: plugin/backend/go.sum
+
+      - name: Point SDK replace at the checked-out framework
+        working-directory: plugin/backend
+        run: go mod edit -replace github.com/keeptrue/sforum/apps/api="$GITHUB_WORKSPACE/sforum/apps/api"
+
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }} package
+        id: package
+        run: |
+          set -euo pipefail
+          STAGE="$GITHUB_WORKSPACE/stage"
+          rm -rf "$STAGE"; mkdir -p "$STAGE/backend"
+          # 只复制运行时需要的文件：Go 源码、go.mod/sum、.github、upstream 子模块都不进发布包。
+          cp plugin/sforum.extension.json plugin/README.md plugin/LICENSE "$STAGE/"
+
+          (cd plugin/backend && \
+            CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath -ldflags "-s -w" -o "$STAGE/backend/plugin" ./)
+
+          VERSION="$(python3 -c "import json;print(json.load(open('plugin/sforum.extension.json'))['version'])")"
+          ASSET="${PACKAGE_SLUG}_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cd sforum/apps/api
+          # 每个平台的二进制不同，摘要必须按该平台重新写入后再打包。
+          go run ./cmd/sforum extension digest --write "$STAGE"
+          go run ./cmd/sforum extension validate "$STAGE"
+          go run ./cmd/sforum extension package "$STAGE" --exclude-source -o "$GITHUB_WORKSPACE/dist/$ASSET.zip"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.asset }}
+          path: |
+            dist/*.zip
+            dist/*.zip.sbom.json
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Compute checksums
+        working-directory: dist
+        run: sha256sum *.zip | tee SHA256SUMS
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## 安装'
+            echo
+            echo '1. 下载与服务器平台匹配的压缩包（`linux_amd64` / `linux_arm64` / `darwin_arm64` / `darwin_amd64`）。'
+            echo '2. 装到 SForum：后台「插件管理 → 安装插件」上传 zip；或解压到某个外部源根的 `plugins/wiki.harvester/`（即本仓库的目录布局）。'
+            echo '3. 后台启用 **Wiki Harvester**，按宿主提示完成一次 exact-artifact `super_admin` 信任确认。'
+            echo '4. 在站点 AI 设置 `reply.tools.allowed` 中列出 `wiki-harvest-status`，模型才能看到该工具。'
+            echo
+            echo '每个压缩包内的清单摘要与其中可执行文件一一对应，跨平台包不可混用；校验：`sha256sum -c SHA256SUMS`。'
+            echo
+            echo '## 兼容性'
+            echo
+            echo '使用宿主 Protocol V2（`sforum.host@2`）与 Manifest V3，`sforumVersion` 声明为 `>=3.0.0`。'
+            echo '宿主自 v3.0.17 起强制执行该约束：声明范围不覆盖运行中的 coreVersion 时，安装返回 422、启用返回 409（`extension.core_incompatible`）。'
+          } > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md dist/*
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'

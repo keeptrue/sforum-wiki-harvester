@@ -1,4 +1,12 @@
-name: CI
+name: ci
+
+# 每次推送到 master / PR 都跑：后端 vet + 单测 + 宿主契约校验 + 核心兼容闸门。
+#
+# 宿主 apps/api 尚未发布为 Go module，所以这里单独检出 SForum 源码，
+# 再把 backend/go.mod 的 replace 指过去——不依赖仓库里的 upstream/sforum 子模块，
+# 因此 CI 也不需要 submodules: recursive。
+#
+# 本仓库的扩展包根就是仓库根（sforum.extension.json 在根目录）。
 
 on:
   push:
@@ -6,26 +14,76 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  SFORUM_REPOSITORY: keeptrue/SForum
+  # 跟随宿主 main；需要锁定时改成 tag（如 v3.0.20）或 commit。
+  SFORUM_REF: main
+
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
-      - uses: actions/setup-go@v5
+          path: plugin
+
+      # fetch-depth: 0 是核心兼容闸门的前提：宿主的 coreVersion 由
+      # `git describe --tags --match 'v[0-9]*'` 推导，浅克隆没有 tag 会退化成 1.0.0。
+      - name: Checkout SForum framework
+        uses: actions/checkout@v4
         with:
-          go-version-file: backend/go.mod
-      - name: Vet
-        working-directory: backend
-        run: go vet ./...
-      - name: Test
-        working-directory: backend
-        run: go test ./...
-      - name: Build
-        working-directory: backend
-        run: go build -o plugin .
-      - uses: actions/upload-artifact@v4
+          repository: ${{ env.SFORUM_REPOSITORY }}
+          ref: ${{ env.SFORUM_REF }}
+          path: sforum
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          name: backend-plugin
-          path: backend/plugin
+          go-version-file: plugin/backend/go.mod
+          cache-dependency-path: plugin/backend/go.sum
+
+      - name: Point SDK replace at the checked-out framework
+        working-directory: plugin/backend
+        run: go mod edit -replace github.com/keeptrue/sforum/apps/api="$GITHUB_WORKSPACE/sforum/apps/api"
+
+      - name: Backend vet and unit tests
+        working-directory: plugin/backend
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build plugin binary (host platform)
+        working-directory: plugin/backend
+        run: CGO_ENABLED=0 go build -trimpath -o "$GITHUB_WORKSPACE/plugin/backend/plugin" ./
+
+      - name: Refresh package digests
+        working-directory: sforum/apps/api
+        run: go run ./cmd/sforum extension digest --write "$GITHUB_WORKSPACE/plugin"
+
+      - name: Report stale committed digests (non-blocking)
+        working-directory: plugin
+        run: |
+          if ! git diff --quiet -- sforum.extension.json; then
+            echo "::notice title=包摘要有变化::本机构建的可执行文件摘要与仓库中的不一致（工具链差异常见）。发布流水线会按平台重新写入摘要，无需手工提交。"
+            git --no-pager diff --stat -- sforum.extension.json
+          fi
+
+      - name: Extension manifest validation
+        working-directory: sforum/apps/api
+        run: go run ./cmd/sforum extension validate "$GITHUB_WORKSPACE/plugin"
+
+      - name: Extension host contract checks
+        working-directory: sforum/apps/api
+        run: go run ./cmd/sforum extension test "$GITHUB_WORKSPACE/plugin"
+
+      # validate / test 都不看 sforumVersion，真正拦人的是生命周期的
+      # ensureCoreCompatible。这一步调用宿主的同一个函数，避免「测试全绿但装不上」。
+      - name: Host core compatibility gate
+        working-directory: sforum/apps/api
+        run: go run "$GITHUB_WORKSPACE/plugin/.github/compatcheck/main.go" "$GITHUB_WORKSPACE/plugin/sforum.extension.json"
